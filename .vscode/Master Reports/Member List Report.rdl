@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition">
+    <ReportSections>
+        <ReportSection>
+            <Body>
+                <ReportItems>
+                    <!-- Header -->
+                    <Rectangle Name="HeaderRect">
+                        <Height>1in</Height>
+                        <Style>
+                            <BackgroundColor>#4472C4</BackgroundColor>
+                        </Style>
+                        <ReportItems>
+                            <Textbox Name="ReportTitle">
+                                <Value>Member List Report</Value>
+                                <Style>
+                                    <Color>White</Color>
+                                    <FontSize>24pt</FontSize>
+                                    <FontWeight>Bold</FontWeight>
+                                    <TextAlign>Center</TextAlign>
+                                    <VerticalAlign>Middle</VerticalAlign>
+                                </Style>
+                            </Textbox>
+                        </ReportItems>
+                    </Rectangle>
+
+                    <!-- Data Table -->
+                    <Tablix>
+                        <TablixBody>
+                            <!-- Define columns for member data -->
+                            <TablixColumns>
+                                <TablixColumn>
+                                    <Width>1in</Width>
+                                </TablixColumn>
+                                <!-- Add more columns as needed -->
+                            </TablixColumns>
+                            <TablixRows>
+                                <!-- Header Row -->
+                                <TablixRow>
+                                    <Height>0.25in</Height>
+                                    <TablixCells>
+                                        <TablixCell>
+                                            <Style>
+                                                <BackgroundColor>#70AD47</BackgroundColor>
+                                                <Color>White</Color>
+                                                <FontWeight>Bold</FontWeight>
+                                            </Style>
+                                        </TablixCell>
+                                    </TablixCells>
+                                </TablixRow>
+                            </TablixRows>
+                        </TablixBody>
+                    </Tablix>
+                </ReportItems>
+            </Body>
+        </ReportSection>
+    </ReportSections>
+</Report> 

@@ -1,0 +1,27 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition">
+    <ReportSections>
+        <ReportSection>
+            <Body>
+                <ReportItems>
+                    <!-- Timeline Visual -->
+                    <Rectangle>
+                        <Height>2in</Height>
+                        <Style>
+                            <BackgroundColor>#ED7D31</BackgroundColor>
+                        </Style>
+                        <!-- Payment timeline visualization -->
+                    </Rectangle>
+
+                    <!-- Payment Details -->
+                    <Tablix>
+                        <Style>
+                            <AlternateRowColor>#F8CBAD</AlternateRowColor>
+                        </Style>
+                        <!-- Define payment details -->
+                    </Tablix>
+                </ReportItems>
+            </Body>
+        </ReportSection>
+    </ReportSections>
+</Report> 

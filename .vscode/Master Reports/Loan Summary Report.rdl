@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition">
+    <ReportSections>
+        <ReportSection>
+            <Body>
+                <ReportItems>
+                    <!-- Header with Chart -->
+                    <Chart>
+                        <ChartType>Pie</ChartType>
+                        <Style>
+                            <BackgroundColor>#FFFFFF</BackgroundColor>
+                        </Style>
+                        <ChartData>
+                            <!-- Define loan status distribution -->
+                        </ChartData>
+                    </Chart>
+
+                    <!-- Summary Table -->
+                    <Tablix>
+                        <Style>
+                            <BackgroundColor>#F2F2F2</BackgroundColor>
+                            <BorderStyle>Solid</BorderStyle>
+                        </Style>
+                        <!-- Define loan summary data -->
+                    </Tablix>
+                </ReportItems>
+            </Body>
+        </ReportSection>
+    </ReportSections>
+</Report> 

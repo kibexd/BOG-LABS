@@ -1,0 +1,27 @@
+{
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "murimaa",
+            "request": "launch",
+            "type": "al",
+            "environmentType": "OnPrem",
+            "server": "https://murimaa",
+            "serverInstance": "BC",
+            "authentication": "UserPassword",
+            // "userName": "admin",
+            // "password": "P@ssw0rd"
+            "startupObjectId": 50100,
+            "startupObjectType": "Page",
+            "breakOnError": true,
+            "launchBrowser": true,
+            "enableLongRunningSqlStatements": true,
+            "enableSqlInformationDebugger": true,
+            "tenant": "default",
+            "port": 7049,
+            "schemaUpdateMode": "ForceSync"
+            // "disableCertificateValidation": true
+
+        }
+    ]
+}

@@ -1,0 +1,32 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Report xmlns="http://schemas.microsoft.com/sqlserver/reporting/2016/01/reportdefinition">
+    <ReportSections>
+        <ReportSection>
+            <Body>
+                <ReportItems>
+                    <!-- Summary Cards -->
+                    <Rectangle>
+                        <ReportItems>
+                            <Textbox>
+                                <Style>
+                                    <BackgroundColor>#A5A5A5</BackgroundColor>
+                                    <Color>White</Color>
+                                    <FontSize>14pt</FontSize>
+                                </Style>
+                                <!-- Outstanding amount summary -->
+                            </Textbox>
+                        </ReportItems>
+                    </Rectangle>
+
+                    <!-- Detailed List -->
+                    <Tablix>
+                        <Style>
+                            <BackgroundColor>#E7E6E6</BackgroundColor>
+                        </Style>
+                        <!-- Define outstanding loans details -->
+                    </Tablix>
+                </ReportItems>
+            </Body>
+        </ReportSection>
+    </ReportSections>
+</Report> 
