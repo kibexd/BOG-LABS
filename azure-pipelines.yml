@@ -1,0 +1,80 @@
+# Pipeline name using the build ID
+name: $(Build.BuildId)
+
+# Define the variables used throughout the pipeline
+variables:
+- name: 'AppVersion'
+  value: '1.0.0.0'  # Updated to match app.json version
+- name: 'bcServerUrl'
+  value: 'https://murimaa'         # Your local BC server URL
+- name: 'bcServerInstance'
+  value: 'BC'                      # Your BC server instance
+- name: 'projectName'
+  value: 'BOG LABS'  # Updated to match app.json name
+- name: 'publisher'
+  value: 'Default Publisher'       # Matches your app.json publisher
+- name: 'TestFilter'
+  value: '50100..50149'  # Matches your app.json idRanges
+
+# Specify which agent pool to use
+pool:
+  name: HOD-DOCKER  # Your organization's agent pool
+
+# Pipeline steps
+steps:
+# Step 1: Get the latest code
+- checkout: self
+  clean: true
+    
+# Step 2: Compile the AL application
+- task: ALOpsAppCompiler@1
+  displayName: 'Compile Extension'
+  inputs:
+    usedocker: false               # Not using docker
+    nav_server_url: $(bcServerUrl)
+    nav_serverinstance: $(bcServerInstance)
+    nav_app_version: $(AppVersion)
+    failed_on_warnings: false
+    app_file_suffix: '_$(Build.BuildId)'
+    publish_artifact: true
+    auth: 'UserPassword'           # Match your launch.json authentication
+    username: 'admin'              # Your BC username
+    password: 'P@ssw0rd'          # Your BC password
+
+# Step 3: Publish the compiled app
+- task: ALOpsAppPublish@1
+  displayName: 'Publish Extension'
+  inputs:
+    usedocker: false              # Not using docker
+    nav_server_url: $(bcServerUrl)
+    nav_serverinstance: $(bcServerInstance)
+    nav_artifact_app_filter: '*.app'
+    skip_verification: true 
+    install_after_upload: true
+    sync_mode: Add
+    publish_scope: 'Tenant'       # Publish to tenant
+
+# Step 4: Run tests
+- task: ALOpsAppTest@1
+  displayName: 'Run Tests'
+  condition: succeeded()
+  continueOnError: true
+  inputs:
+    usedocker: false             # Not using docker
+    nav_server_url: $(bcServerUrl)
+    nav_serverinstance: $(bcServerInstance)
+    testfilter: $(TestFilter)
+    import_action: "Skip"
+    import_testtoolkit: true
+    failed_test_action: 'Warn'
+
+# Step 5: Publish test results
+- task: PublishTestResults@2
+  displayName: 'Publish Test Results'
+  condition: succeededOrFailed()
+  inputs:
+    testResultsFormat: XUnit
+    testResultsFiles: '**/TestResults.xml'
+    testRunTitle: '$(projectName) - $(Build.BuildId)'
+    failTaskOnFailedTests: false
+
