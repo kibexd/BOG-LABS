@@ -40,6 +40,7 @@ steps:
     auth: 'UserPassword'           # Authentication method
     username: 'admin'              # Business Central username
     password: 'P@ssw0rd'          # Business Central password
+    al_version: '15.0.1290655'     # Updated to the available version
 
 # Step 3: Publish the compiled app
 - task: ALOpsAppPublish@1
