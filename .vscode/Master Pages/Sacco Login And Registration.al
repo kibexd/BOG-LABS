@@ -31,6 +31,11 @@
 // which is the button that the user clicks to perform the selected action.
 // area(FactBoxes): This is an area that contains fact boxes, including the logo and action buttons,
 // which are used to display additional information and provide quick access to common actions.
+
+/// <summary>
+/// Page Sacco Login and Registration (ID 50100).
+/// Provides interface for user authentication and new account registration.
+/// </summary>
 page 50100 "Sacco Login and Registration" // This defines a page for logging in and registering users
 {
     PageType = Card; // The type of page is a card
@@ -169,6 +174,20 @@ page 50100 "Sacco Login and Registration" // This defines a page for logging in 
                     Style = Favorable; // This field has a favorable style
                     StyleExpr = IsProfilePictureUploaded; // The style depends on whether a picture is uploaded
                 }
+
+                field(PasswordStrength; PasswordStrengthText) // Field for displaying the uploaded profile picture
+                {
+                    ApplicationArea = All; // This field is available in all application areas
+                    Caption = 'Password Strength'; // Label for the field
+                    Editable = false; // This field cannot be edited
+                    Style = Strong;
+                    StyleExpr = IsStrongPassword; // The style depends on the password strength
+
+                    trigger OnValidate() // This code runs when the user enters or changes the password
+                    begin
+                        UpdatePasswordStrength(); // Calls a function to update the password strength
+                    end;
+                }
             }
 
             group(ActionButton) // This group contains the action button
@@ -223,12 +242,17 @@ page 50100 "Sacco Login and Registration" // This defines a page for logging in 
         IsProfilePictureUploaded: Boolean; // Variable to indicate if a profile picture is uploaded
         UploadPictureLbl: Label 'Upload Picture'; // Label for the upload picture button
         GlobalVar: Codeunit "Sacco Global Variables"; // Add this line to declare the global variable codeunit
+        IsStrongPassword: Boolean; // Variable to indicate if the password is strong
+        PasswordStrengthText: Text; // Variable to store the password strength text
 
     trigger OnOpenPage() // This code runs when the page is opened
     begin
         UpdateActionButton(); // Calls a function to update the action button based on the selected action
     end;
 
+    /// <summary>
+    /// Updates the action button caption based on the selected action type.
+    /// </summary>
     procedure UpdateActionButton() // This function updates the action button caption
     begin
         if ActionType = ActionType::Login then // Check if the action is Login
@@ -237,6 +261,9 @@ page 50100 "Sacco Login and Registration" // This defines a page for logging in 
             ActionButtonCaption := '📝 Register'; // Otherwise, set it to Register
     end;
 
+    /// <summary>
+    /// Handles the upload of a user's profile picture and stores it in a temporary blob.
+    /// </summary>
     procedure UploadProfilePicture() // This function handles uploading a profile picture
     var
         FromFileName: Text; // Variable to store the name of the file being uploaded
@@ -345,5 +372,72 @@ page 50100 "Sacco Login and Registration" // This defines a page for logging in 
                 HasDigit := true; // Set digit check to true
         end;
         exit(HasUpper and HasDigit); // Return true if both checks are true
+    end;
+
+    procedure UpdatePasswordStrength()
+    var
+        Score: Integer; // Variable to store the password strength score
+    begin
+        Score := 0;
+        if StrLen(Password) >= 8 then
+            Score += 1;
+        if ContainsUpperCase(Password) then
+            Score += 1;
+        if ContainsLowerCase(Password) then
+            Score += 1;
+        if ContainsNumber(Password) then
+            Score += 1;
+        if ContainsSpecialChar(Password) then
+            Score += 1;
+
+        case Score of
+            0 .. 1:
+                begin
+                    PasswordStrengthText := '❌ Weak';
+                    IsStrongPassword := false;
+                end;
+            2 .. 3:
+                begin
+                    PasswordStrengthText := '⚠️ Medium';
+                    IsStrongPassword := false;
+                end;
+            4 .. 5:
+                begin
+                    PasswordStrengthText := '✅ Strong';
+                    IsStrongPassword := true;
+                end;
+        end;
+    end;
+
+    procedure ContainsUpperCase(InputText: Text): Boolean
+    begin
+        exit(InputText <> LowerCase(InputText));
+    end;
+
+    procedure ContainsLowerCase(InputText: Text): Boolean
+    begin
+        exit(InputText <> UpperCase(InputText));
+    end;
+
+    procedure ContainsNumber(InputText: Text): Boolean
+    var
+        i: Integer;
+    begin
+        for i := 1 to StrLen(InputText) do
+            if (InputText[i] >= '0') and (InputText[i] <= '9') then
+                exit(true);
+        exit(false);
+    end;
+
+    procedure ContainsSpecialChar(InputText: Text): Boolean
+    var
+        SpecialChars: Text;
+        i: Integer;
+    begin
+        SpecialChars := '!@#$%^&*()_+-=[]{}|;:,.<>?';
+        for i := 1 to StrLen(InputText) do
+            if StrPos(SpecialChars, Format(InputText[i])) > 0 then
+                exit(true);
+        exit(false);
     end;
 }

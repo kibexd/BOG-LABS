@@ -213,6 +213,8 @@ page 50113 "Sacco Member Dashboardd"
                 trigger OnAction()
                 begin
                     Message('Statement feature coming soon.');
+                    // Commented out email retrieval logic
+                    // RetrieveEmail(); // Placeholder for email retrieval logic
                 end;
             }
 
@@ -429,8 +431,6 @@ page 50113 "Sacco Member Dashboardd"
         PaymentMethod := PaymentMethod::"M-Pesa"; // Reset payment method to a valid default option
                                                   // Clear other related fields as necessary
     end;
-
-
 
     local procedure CalculateLoanDetails()
     var

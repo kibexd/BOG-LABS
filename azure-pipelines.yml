@@ -5,16 +5,10 @@ name: $(Build.BuildId)
 variables:
 - name: 'AppVersion'
   value: '1.0.0.0'  # Version of the application as per app.json
-- name: 'bcServerUrl'
-  value: 'https://murimaa'         # Local Business Central server URL
-- name: 'bcServerInstance'
-  value: 'BC'                      # Business Central server instance
 - name: 'projectName'
   value: 'BOG LABS'  # Project name as defined in app.json
 - name: 'publisher'
-  value: 'Default Publisher'       # Publisher name from app.json
-- name: 'TestFilter'
-  value: '50100..50149'  # ID range for tests as per app.json
+  value: 'Default Publisher'  # Publisher name from app.json
 
 # Specify which agent pool to use
 pool:
@@ -22,60 +16,63 @@ pool:
 
 # Pipeline steps
 steps:
+
 # Step 1: Get the latest code
 - checkout: self
   clean: true
-    
-# Step 2: Compile the AL application
+
+# Step 2: Check if Docker Container is Already Running
+- script: |
+    if docker ps --format "{{.Names}}" | grep -q "boglabs"; then
+      echo "##vso[task.setvariable variable=DOCKER_RUNNING]true"
+    else
+      echo "##vso[task.setvariable variable=DOCKER_RUNNING]false"
+    fi
+  displayName: 'Check if Docker Container is Running'
+
+# Step 3: Create Docker Image (Only if container is NOT running)
+- task: ALOpsDockerCreate@1
+  displayName: 'Create Docker Image'
+  condition: and(succeeded(), eq(variables['DOCKER_RUNNING'], 'false'))  # Skip if running
+  inputs:
+    artifacttype: OnPrem
+    bcversion: '21.0'
+    # licensefile: 'C:\Users\nocki\Documents\CORETEC ! ! !\MISC Files\BC 21 Coretec 5190554.flf'  # Commented out
+
+# Step 4: Start Docker Container (Only if container is NOT running)
+- task: ALOpsDockerStart@1
+  displayName: 'Start Docker Container'
+  condition: and(succeeded(), eq(variables['DOCKER_RUNNING'], 'false'))  # Skip if running
+
+# Step 5: Wait for Docker Container (Uses Existing Container)
+- task: ALOpsDockerWait@1
+  displayName: 'Wait for Docker Container'
+  inputs:
+    containername: 'boglabs'  # Forces ALOps to wait for the correct container
+    search_string: 'Ready for connections!'
+
+# Step 6: Compile the AL application
 - task: ALOpsAppCompiler@1
-  displayName: 'Compile Extension'
+  displayName: 'Compile AL Application'
   inputs:
-    usedocker: false               # Not using Docker for compilation
-    nav_server_url: $(bcServerUrl)  # URL of the Business Central server
-    nav_serverinstance: $(bcServerInstance)  # Instance of the Business Central server
-    nav_app_version: $(AppVersion)  # Application version
-    failed_on_warnings: false      # Do not fail on warnings
-    app_file_suffix: '_$(Build.BuildId)'  # Suffix for the app file
-    publish_artifact: true         # Publish the artifact
-    auth: 'UserPassword'           # Authentication method
-    username: 'admin'              # Business Central username
-    password: 'P@ssw0rd'          # Business Central password
-    versionselect: '15.0.1290655'  # Updated to the available version
+    usedocker: true
+    artifactversion: '21.0'
+    artifacttype: 'OnPrem'
+    artifactcountry: 'w1'
+    app_version: '1.0.0.0'
+    app_filename: '$(publisher)_$(projectName)'
+    publish_artifact: true
+    failed_on_warnings: false
 
-# Step 3: Publish the compiled app
-- task: ALOpsAppPublish@1
-  displayName: 'Publish Extension'
+# Step 7: Publish the compiled app
+- task: PublishBuildArtifacts@1
+  displayName: 'Publish AL App'
   inputs:
-    usedocker: false              # Not using Docker for publishing
-    nav_server_url: $(bcServerUrl)  # URL of the Business Central server
-    nav_serverinstance: $(bcServerInstance)  # Instance of the Business Central server
-    nav_artifact_app_filter: '*.app'  # Filter for the app artifact
-    skip_verification: true       # Skip verification step
-    install_after_upload: true     # Install after upload
-    sync_mode: Add                # Synchronization mode
-    publish_scope: 'Tenant'       # Publish to tenant scope
+    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+    ArtifactName: 'ALApp'
+    publishLocation: 'Container'
 
-# Step 4: Run tests
-- task: ALOpsAppTest@1
-  displayName: 'Run Tests'
-  condition: succeeded()          # Run tests if previous steps succeeded
-  continueOnError: true          # Continue on error
-  inputs:
-    usedocker: false             # Not using Docker for tests
-    nav_server_url: $(bcServerUrl)  # URL of the Business Central server
-    nav_serverinstance: $(bcServerInstance)  # Instance of the Business Central server
-    testfilter: $(TestFilter)    # Test filter based on ID range
-    import_action: "Skip"        # Action for importing
-    import_testtoolkit: true     # Import test toolkit
-    failed_test_action: 'Warn'   # Action on failed tests
-
-# Step 5: Publish test results
-- task: PublishTestResults@2
-  displayName: 'Publish Test Results'
-  condition: succeededOrFailed()  # Publish results regardless of success
-  inputs:
-    testResultsFormat: XUnit      # Format of test results
-    testResultsFiles: '**/TestResults.xml'  # Path to test results
-    testRunTitle: '$(projectName) - $(Build.BuildId)'  # Title for the test run
-    failTaskOnFailedTests: false  # Do not fail task on failed tests
-
+# Step 8: Remove Docker Container (Only if it was started in this pipeline)
+- task: ALOpsDockerRemove@1
+  displayName: 'Remove Docker Container'
+  condition: and(always(), eq(variables['DOCKER_RUNNING'], 'false'))  # Skip if already running

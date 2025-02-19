@@ -14,4 +14,9 @@ codeunit 50140 "Sacco Global Variabless"
     begin
         exit(CurrentUserEmail);
     end;
+
+    // procedure GetUserEmail(): Text[70]
+    // begin
+    //     exit (CurrentUserEmail);
+    // end;
 }

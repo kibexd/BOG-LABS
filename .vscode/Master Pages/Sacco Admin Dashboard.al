@@ -105,7 +105,20 @@ page 50126 "Sacco Admin Dashboard"
                 part(MembersList; "Admin Members List Part")
                 {
                     ApplicationArea = All;
+                    Caption = 'Manage Members';
                 }
+
+                // field(UserStatus; UserStatus)
+                // {
+                //     ApplicationArea = All;
+                //     Caption = 'User Status';
+                //     ToolTip = 'Current status of the user';
+                //     Editable = true;
+                //     trigger OnValidate()
+                //     begin
+                //         UpdateUserStatus();
+                //     end;
+                // }
             }
 
             group(RecentActivities)

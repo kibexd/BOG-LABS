@@ -2,11 +2,11 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "murimaa",
+            "name": "boglabs",
             "request": "launch",
             "type": "al",
             "environmentType": "OnPrem",
-            "server": "https://murimaa",
+            "server": "https://boglabs",
             "serverInstance": "BC",
             "authentication": "UserPassword",
             // "userName": "admin",
