@@ -1,78 +1,103 @@
-# Pipeline name using the build ID
 name: $(Build.BuildId)
 
-# Define the variables used throughout the pipeline
+trigger:
+  branches:
+    include:
+      - Production
+
+pr:
+  branches:
+    include:
+      - main
+      - Production
+      - staging
+
 variables:
-- name: 'AppVersion'
-  value: '1.0.0.0'  # Version of the application as per app.json
-- name: 'projectName'
-  value: 'BOG LABS'  # Project name as defined in app.json
-- name: 'publisher'
-  value: 'Default Publisher'  # Publisher name from app.json
+  - name: 'AppVersion'
+    value: '1.0.0.$(Build.BuildId)'
+  - name: 'projectName'
+    value: 'BOG_LABS'
+  - name: 'publisher'
+    value: 'Default_Publisher'
+  - name: 'containerName'
+    value: 'boglabs'
+  - name: 'alcPath'
+    value: 'C:\Users\nocki\Documents\BUSINESS CENTRAL ❕❗\BOG LABS\ALC\alc.exe'
 
-# Specify which agent pool to use
 pool:
-  name: BOG  # Organization's agent pool
+  name: BOG
 
-# Pipeline steps
 steps:
+  - checkout: self
+    clean: true
 
-# Step 1: Get the latest code
-- checkout: self
-  clean: true
+  - powershell: |
+      $container = docker ps --filter "name=$(containerName)" --format "{{.Status}}"
+      if ($container -match "Up") {
+          Write-Host "Container '$(containerName)' is running"
+      } else {
+          Write-Host "##[error]Container '$(containerName)' not found or not running"
+          exit 1
+      }
+    displayName: 'Verify Container Status'
 
-# Step 2: Check if Docker Container is Already Running
-- script: |
-    if docker ps --format "{{.Names}}" | grep -q "boglabs"; then
-      echo "##vso[task.setvariable variable=DOCKER_RUNNING]true"
-    else
-      echo "##vso[task.setvariable variable=DOCKER_RUNNING]false"
-    fi
-  displayName: 'Check if Docker Container is Running'
+  - powershell: |
+      $appJsonPath = "$(Build.SourcesDirectory)\app.json"
+      $appJson = Get-Content $appJsonPath | ConvertFrom-Json
+      $appJson.version = "$(AppVersion)"
+      $appJson | ConvertTo-Json -Depth 100 | Set-Content $appJsonPath
+    displayName: 'Set App Version'
 
-# Step 3: Create Docker Image (Only if container is NOT running)
-- task: ALOpsDockerCreate@1
-  displayName: 'Create Docker Image'
-  condition: and(succeeded(), eq(variables['DOCKER_RUNNING'], 'false'))  # Skip if running
-  inputs:
-    artifacttype: OnPrem
-    bcversion: '21.0'
-    # licensefile: 'C:\Users\nocki\Documents\CORETEC ! ! !\MISC Files\BC 21 Coretec 5190554.flf'  # Commented out
+  - powershell: |
+      Install-Module BcContainerHelper -Force
+      Import-Module BcContainerHelper
+      Write-Host "BcContainerHelper module installed and loaded."
+    displayName: 'Install BcContainerHelper'
 
-# Step 4: Start Docker Container (Only if container is NOT running)
-- task: ALOpsDockerStart@1
-  displayName: 'Start Docker Container'
-  condition: and(succeeded(), eq(variables['DOCKER_RUNNING'], 'false'))  # Skip if running
+  - powershell: |
+      $alcPath = "$(alcPath)"
+      if (-Not (Test-Path $alcPath)) {
+          Write-Host "##[error]ALC compiler not found at $alcPath"
+          exit 1
+      }
+      Write-Host "ALC compiler found at $alcPath"
+      & $alcPath /project:"$(Build.SourcesDirectory)" /packagecachepath:"$(Build.SourcesDirectory)\.alpackages" /out:"$(Build.ArtifactStagingDirectory)\$(projectName)_$(AppVersion).app"
+    displayName: 'Compile AL App with ALC'
 
-# Step 5: Wait for Docker Container (Uses Existing Container)
-- task: ALOpsDockerWait@1
-  displayName: 'Wait for Docker Container'
-  inputs:
-    containername: 'boglabs'  # Forces ALOps to wait for the correct container
-    search_string: 'Ready for connections!'
+  - task: PublishBuildArtifacts@1
+    displayName: 'Publish AL App'
+    inputs:
+      PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+      ArtifactName: 'ALApp'
+      publishLocation: 'Container'
 
-# Step 6: Compile the AL application
-- task: ALOpsAppCompiler@1
-  displayName: 'Compile AL Application'
-  inputs:
-    usedocker: true
-    artifactversion: '21.0'
-    artifacttype: 'OnPrem'
-    artifactcountry: 'w1'
-    app_version: '1.0.0.0'
-    app_filename: '$(publisher)_$(projectName)'
-    publish_artifact: true
-    failed_on_warnings: false
+  - powershell: |
+      Write-Host "=== Compilation Results ==="
+      Get-ChildItem "$(Build.ArtifactStagingDirectory)" -Recurse
+    displayName: 'Log Compilation Results'
+    condition: always()
 
-# Step 7: Publish the compiled app
-- task: PublishBuildArtifacts@1
-  displayName: 'Publish AL App'
-  inputs:
-    PathtoPublish: '$(Build.ArtifactStagingDirectory)'
-    ArtifactName: 'ALApp'
-    publishLocation: 'Container'
+  - powershell: |
+      echo "##vso[task.setvariable variable=docker_tag]$(Build.BuildId)"
+    displayName: 'Set Docker Tag'
 
-# Step 8: Remove Docker Container (Only if it was started in this pipeline)
-- task: ALOpsDockerRemove@1
-  displayName: 'Remove Docker Container'
-  condition: and(always(), eq(variables['DOCKER_RUNNING'], 'false'))  # Skip if already running
+jobs:
+- job: dockerBuildPush
+  displayName: 'Docker Build and Push'
+  pool:
+    vmImage: 'ubuntu-latest'
+
+  steps:
+    - checkout: self
+
+    - task: DownloadPipelineArtifact@2
+      inputs:
+        artifact: 'ALApp'
+        path: './app-package'
+
+    - powershell: |
+        docker login -u $(DOCKERHUB_USERNAME) -p $(DOCKERHUB_TOKEN)
+        docker build -t $(DOCKERHUB_USERNAME)/bc-app:latest -t $(DOCKERHUB_USERNAME)/bc-app:$(docker_tag) .
+        docker push $(DOCKERHUB_USERNAME)/bc-app:latest
+        docker push $(DOCKERHUB_USERNAME)/bc-app:$(docker_tag)
+      displayName: 'Build and Push Docker Image'
