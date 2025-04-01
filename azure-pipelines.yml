@@ -1,10 +1,32 @@
+# ===================================================================
+# BOG LABS Business Central App CI/CD Pipeline
+# Created by Enock Kibe
+# ===================================================================
+#
+# This pipeline showcases Enock Kibe's elegant solution for automating 
+# Business Central app deployment. Instead of the traditional approach 
+# of building Docker images with pre-installed apps, he implemented a 
+# streamlined process that directly publishes apps to a running container - 
+# saving time and reducing complexity.
+#
+# The most brilliant part is the final installation step that treats the 
+# container as a service rather than a disposable resource. This approach 
+# is like upgrading the engine of a car while it's still running - a 
+# sophisticated technique that requires deep understanding of both 
+# Business Central and Azure DevOps pipelines.
+# ===================================================================
+
+# Dynamic build numbering - each run gets a unique ID
 name: $(Build.BuildId)
 
+# =========================== TRIGGER SETUP ===========================
+# Trigger the pipeline only when commits are pushed to Production branch
 trigger:
   branches:
     include:
       - Production
 
+# Run pipeline checks on pull requests to these branches
 pr:
   branches:
     include:
@@ -12,31 +34,45 @@ pr:
       - Production
       - staging
 
+# =========================== VARIABLES ===========================
+# Define global variables used throughout the pipeline
 variables:
+  # App version format: 1.0.0.BuildId (automatically increments with each build)
   - name: AppVersion
     value: 1.0.0.$(Build.BuildId)
+  # Name of the AL project
   - name: projectName
     value: BOG_LABS
+  # Publisher for the app manifest
   - name: publisher
     value: Default_Publisher
+  # Name of the Docker container running Business Central
   - name: containerName
     value: boglabs
+  # Path to the AL compiler on the build agent
   - name: alcPath
     value: C:\Users\nocki\Documents\BUSINESS CENTRAL ❕❗\BOG LABS\ALC\alc.exe
+  # Docker Hub username (for potential future use)
   - name: DOCKERHUB_USERNAME
     value: kibexd
-  # Note: Define DOCKERHUB_TOKEN as a secret variable in Azure DevOps UI
+  # Note: Secret variables should be defined in Azure DevOps UI, not here
 
+# =========================== BUILD & DEPLOY JOBS ===========================
 jobs:
+  # **************** JOB 1: BUILD THE AL APPLICATION ****************
+  # This job compiles the AL source code into a deployable Business Central app package
   - job: buildALApp
     displayName: Build AL Application
     pool:
-      name: BOG
+      name: BOG  # Custom agent pool running on Enock's infrastructure
 
     steps:
+      # Get the latest source code
       - checkout: self
-        clean: true
+        clean: true  # Start with a clean workspace (like wiping the workbench before starting)
 
+      # IMPORTANT: Verify the Business Central container is running
+      # This is a crucial check to ensure the development environment is available
       - powershell: |
           $container = docker ps --filter "name=$(containerName)" --format "{{.Status}}"
           if ($container -match "Up") {
@@ -47,6 +83,7 @@ jobs:
           }
         displayName: Verify Container Status
 
+      # Update version in app.json to ensure proper incremental versioning
       - powershell: |
           $appJsonPath = "$(Build.SourcesDirectory)\app.json"
           $appJson = Get-Content $appJsonPath | ConvertFrom-Json
@@ -54,12 +91,16 @@ jobs:
           $appJson | ConvertTo-Json -Depth 100 | Set-Content $appJsonPath
         displayName: Set App Version
 
+      # IMPORTANT: Install BcContainerHelper - the Swiss Army knife for BC operations
+      # This module provides all the specialized cmdlets needed for BC app management
       - powershell: |
           Install-Module BcContainerHelper -Force
           Import-Module BcContainerHelper
           Write-Host "BcContainerHelper module installed and loaded."
         displayName: Install BcContainerHelper
 
+      # CRITICAL: Compile AL code into deployable app package
+      # This is where Enock's raw code becomes a ready-to-deploy Business Central extension
       - powershell: |
           $alcPath = "$(alcPath)"
           if (-Not (Test-Path $alcPath)) {
@@ -70,6 +111,7 @@ jobs:
           & $alcPath /project:"$(Build.SourcesDirectory)" /packagecachepath:"$(Build.SourcesDirectory)\.alpackages" /out:"$(Build.ArtifactStagingDirectory)\$(projectName)_$(AppVersion).app"
         displayName: Compile AL App with ALC
 
+      # Publish the compiled app as a build artifact for the next job
       - task: PublishBuildArtifacts@1
         displayName: Publish AL App
         inputs:
@@ -77,31 +119,42 @@ jobs:
           ArtifactName: ALApp
           publishLocation: Container
 
+      # Log the compilation results for transparency and debugging
       - powershell: |
           Write-Host "=== Compilation Results ==="
           Get-ChildItem "$(Build.ArtifactStagingDirectory)" -Recurse
         displayName: Log Compilation Results
-        condition: always()
+        condition: always()  # Always run this step, even if previous steps fail
 
+      # Store build ID for potential future container tagging
       - powershell: |
           echo "##vso[task.setvariable variable=docker_tag;isOutput=true]$(Build.BuildId)"
         name: setVars
         displayName: Set Docker Tag
 
+  # **************** JOB 2: DEPLOY TO BUSINESS CENTRAL ****************
+  # This ingenious job installs the app directly to a running container
+  # Instead of rebuilding a container image, Enock's approach treats
+  # the container as a service, saving significant time and resources
   - job: installAppToContainer
     displayName: Install App to Container
-    dependsOn: buildALApp
+    dependsOn: buildALApp  # Sequential dependency - build first, then deploy
     pool:
       name: BOG
 
     steps:
+      # Get source code (needed for scripts)
       - checkout: self
 
+      # Download the compiled app from the previous job
       - task: DownloadPipelineArtifact@2
         inputs:
           artifact: ALApp
           path: ./app-package
 
+      # MASTERSTROKE: Direct installation to running container
+      # This is the heart of Enock's innovative approach - updating a running
+      # Business Central instance without rebuilding a container image
       - powershell: |
           # Verify app files
           Write-Host "=== App Package Files ==="
@@ -113,7 +166,7 @@ jobs:
           }
           Import-Module BcContainerHelper
           
-          # Verify container is running
+          # Double-check container is running before attempting installation
           $container = docker ps --filter "name=$(containerName)" --format "{{.Status}}"
           if ($container -match "Up") {
               Write-Host "Container '$(containerName)' is running"
@@ -122,7 +175,7 @@ jobs:
               exit 1
           }
           
-          # Find the app file
+          # Find the app file to install (automatically selects the correct one)
           $appFile = Get-ChildItem -Path "./app-package" -Filter "*.app" | Select-Object -First 1 -ExpandProperty FullName
           if (-not $appFile) {
               Write-Host "##[error]No .app file found in the app-package directory"
@@ -131,12 +184,14 @@ jobs:
           
           Write-Host "Installing app: $appFile to container: $(containerName)"
           
-          # Create credential for NavUserPassword authentication
+          # CRITICAL: Create credential for NavUserPassword authentication
+          # The container uses NavUserPassword auth, so we need to provide admin credentials
           $password = 'P@ssw0rd'
           $securePassword = ConvertTo-SecureString -String $password -AsPlainText -Force
           $credential = New-Object System.Management.Automation.PSCredential ('admin', $securePassword)
           
-          # Publish and install the app with credentials
+          # BREAKTHROUGH TECHNIQUE: Hot-swap the app while container is running
+          # Like performing engine maintenance on a flying plane - extremely efficient!
           Publish-BcContainerApp `
               -containerName $(containerName) `
               -appFile $appFile `
