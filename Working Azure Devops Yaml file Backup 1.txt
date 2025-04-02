@@ -283,3 +283,13 @@ jobs:
               throw
           }
         displayName: 'Install App to Container'
+
+The key was identifying the correct parameters for each cmdlet in this BcContainerHelper version.
+My pipeline now handles a clean upgrade process:
+Building the AL app with incremental versioning
+Uninstalling existing versions
+Unpublishing old versions
+Publishing new version
+Data upgrade
+Installation
+This approach is much more efficient than rebuilding Docker images each time, and provides a smoother continuous integration workflow for my Business Central development.
