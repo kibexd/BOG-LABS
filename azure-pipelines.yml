@@ -1,38 +1,47 @@
 # ===================================================================
-# BOG LABS Business Central App CI/CD Pipeline
-# Created by Enock Kibe
+# Business Central App CI/CD Pipeline - Container Integration
+# Optimized for BC Container with Development Tools
 # ===================================================================
 #
-# This pipeline showcases Enock Kibe's elegant solution for automating 
-# Business Central app deployment. Instead of the traditional approach 
-# of building Docker images with pre-installed apps, he implemented a 
-# streamlined process that directly publishes apps to a running container - 
-# saving time and reducing complexity.
-#
-# The most brilliant part is the final installation step that treats the 
-# container as a service rather than a disposable resource. This approach 
-# is like upgrading the engine of a car while it's still running - a 
-# sophisticated technique that requires deep understanding of both 
-# Business Central and Azure DevOps pipelines.
+# This pipeline integrates with your BC container setup featuring:
+# - Container: 'murimatest' with development tools enabled
+# - SQL Server on port 14333 
+# - Development endpoint on port 7050
+# - License file integration
+# - Multitenant configuration
+# 
+# IMPORTANT: Triggers ONLY when changes are committed and pushed to branches
+# Does NOT trigger on staging changes or VS Code publish actions
 # ===================================================================
 
 # Dynamic build numbering - each run gets a unique ID
 name: $(Build.BuildId)
 
 # =========================== TRIGGER SETUP ===========================
-# Trigger the pipeline only when commits are pushed to Production branch
+# Trigger the pipeline only when commits are pushed to main branch
+# CRITICAL: Only triggers on actual commits pushed to repository
+# Will NOT trigger on staged changes or VS Code publish actions
 trigger:
   branches:
     include:
-      - Production
+      - main
+      # Optional: Add other branches as needed
+      # - development
+      # - staging
+  paths:
+    include:
+      - 'src/*'           # Only when AL source code changes
+      - 'app.json'        # Only when app manifest changes
+    exclude:
+      - 'README.md'       # Ignore documentation changes
+      - 'docs/*'          # Ignore documentation folder changes
+      - '*.md'            # Ignore all markdown files
 
 # Run pipeline checks on pull requests to these branches
 pr:
   branches:
     include:
       - main
-      - Production
-      - staging
 
 # =========================== VARIABLES ===========================
 # Define global variables used throughout the pipeline
@@ -40,19 +49,37 @@ variables:
   # App version format: 1.0.0.BuildId (automatically increments with each build)
   - name: AppVersion
     value: 1.0.0.$(Build.BuildId)
+  
   # Name of the AL project
   - name: projectName
-    value: BOG_LABS
+    value: 'BOG_LABS'
+  
   # Publisher for the app manifest
   - name: publisher
-    value: Default_Publisher
+    value: 'Default_Publisher'
+  
   # Name of the Docker container running Business Central
   - name: containerName
-    value: boglabs
+    value: 'murimatest'
+  - name: containerPassword
+    value: 'kife'
+  - name: containerUser
+    value: 'admin'
+  - name: sqlServerPort
+    value: '14333'
+  - name: devEndpointPort
+    value: '7050'
+  
   # Path to the AL compiler on the build agent
   - name: alcPath
-    value: C:\Users\nocki\Documents\BUSINESS CENTRAL ❕❗\BOG LABS\ALC\alc.exe
-  # Docker Hub username (for potential future use)
+    value: 'C:\Users\nocki\Documents\BUSINESS CENTRAL ❕❗\BOG LABS\ALC\alc.exe'
+  
+  # Build configuration
+  - name: buildConfiguration
+    value: 'Release'
+  - name: tenantId
+    value: 'default'
+    # Docker Hub username (for potential future use)
   - name: DOCKERHUB_USERNAME
     value: kibexd
   # Note: Secret variables should be defined in Azure DevOps UI, not here
@@ -61,84 +88,203 @@ variables:
 jobs:
   # **************** JOB 1: BUILD THE AL APPLICATION ****************
   # This job compiles the AL source code into a deployable Business Central app package
-  - job: buildALApp
-    displayName: Build AL Application
+  - job: BuildALApplication
+    displayName: 'Build AL Application'
+    # Custom agent pool running on Enock's infrastructure
     pool:
-      name: BOG  # Custom agent pool running on Enock's infrastructure
-
+      name: BOG
+    
     steps:
       # Get the latest source code
+      # Start with a clean workspace (like wiping the workbench before starting)
       - checkout: self
-        clean: true  # Start with a clean workspace (like wiping the workbench before starting)
+        clean: true
+        displayName: 'Get Source Code'
 
       # IMPORTANT: Verify the Business Central container is running
       # This is a crucial check to ensure the development environment is available
       - powershell: |
-          $container = docker ps --filter "name=$(containerName)" --format "{{.Status}}"
-          if ($container -match "Up") {
-              Write-Host "Container '$(containerName)' is running"
+          Write-Host "=== Container Environment Validation ===" -ForegroundColor Cyan
+          
+          # Check if container exists and is running
+          $containerStatus = docker ps --filter "name=$(containerName)" --format "{{.Status}}"
+          if ($containerStatus -match "Up") {
+              Write-Host "✓ Container '$(containerName)' is running" -ForegroundColor Green
           } else {
-              Write-Host "##[error]Container '$(containerName)' not found or not running"
+              Write-Host "##[error]Container '$(containerName)' is not running!" -ForegroundColor Red
+              Write-Host "Available containers:" -ForegroundColor Yellow
+              docker ps --format "table {{.Names}}\t{{.Status}}\t{{.Ports}}"
               exit 1
           }
-        displayName: Verify Container Status
+          
+          # Test SQL Server port accessibility
+          Write-Host "Testing SQL Server port $(sqlServerPort)..." -ForegroundColor Yellow
+          $tcpTest = Test-NetConnection -ComputerName localhost -Port $(sqlServerPort) -InformationLevel Quiet
+          if ($tcpTest) {
+              Write-Host "✓ SQL Server port $(sqlServerPort) is accessible" -ForegroundColor Green
+          } else {
+              Write-Host "##[warning]SQL Server port $(sqlServerPort) is not accessible" -ForegroundColor Orange
+          }
+        displayName: 'Validate Container Environment'
 
       # Update version in app.json to ensure proper incremental versioning
       - powershell: |
+          Write-Host "=== Updating App Version ===" -ForegroundColor Cyan
+          
           $appJsonPath = "$(Build.SourcesDirectory)\app.json"
-          $appJson = Get-Content $appJsonPath | ConvertFrom-Json
-          $appJson.version = "$(AppVersion)"
-          $appJson | ConvertTo-Json -Depth 100 | Set-Content $appJsonPath
-        displayName: Set App Version
+          if (Test-Path $appJsonPath) {
+              $appJson = Get-Content $appJsonPath | ConvertFrom-Json
+              $oldVersion = $appJson.version
+              $appJson.version = "$(AppVersion)"
+              $appJson | ConvertTo-Json -Depth 100 | Set-Content $appJsonPath -Encoding UTF8
+              
+              Write-Host "Version updated: $oldVersion → $(AppVersion)" -ForegroundColor Green
+              Write-Host "App Name: $($appJson.name)" -ForegroundColor Yellow
+              Write-Host "Publisher: $($appJson.publisher)" -ForegroundColor Yellow
+          } else {
+              Write-Host "##[error]app.json not found at $appJsonPath" -ForegroundColor Red
+              exit 1
+          }
+        displayName: 'Update App Version'
 
       # IMPORTANT: Install BcContainerHelper - the Swiss Army knife for BC operations
       # This module provides all the specialized cmdlets needed for BC app management
       - powershell: |
-          Install-Module BcContainerHelper -Force
-          Import-Module BcContainerHelper
-          Write-Host "BcContainerHelper module installed and loaded."
-        displayName: Install BcContainerHelper
+          Write-Host "=== Installing BcContainerHelper ===" -ForegroundColor Cyan
+          
+          # Check if already installed
+          $module = Get-Module -ListAvailable -Name BcContainerHelper
+          if ($module) {
+              Write-Host "BcContainerHelper version $($module.Version) already installed" -ForegroundColor Yellow
+              Update-Module BcContainerHelper -Force
+              Write-Host "Module updated to latest version" -ForegroundColor Green
+          } else {
+              Install-Module BcContainerHelper -Force -AllowClobber
+              Write-Host "BcContainerHelper installed successfully" -ForegroundColor Green
+          }
+          
+          Import-Module BcContainerHelper -Force
+          Write-Host "BcContainerHelper imported and ready" -ForegroundColor Green
+        displayName: 'Setup BcContainerHelper'
+
+      # Prepare build environment with symbols and cache
+      - powershell: |
+          Write-Host "=== Preparing Build Environment ===" -ForegroundColor Cyan
+          
+          # Create build directories
+          $packageDir = "$(Build.SourcesDirectory)\.alpackages"
+          
+          if (-not (Test-Path $packageDir)) {
+              New-Item -Path $packageDir -ItemType Directory -Force
+              Write-Host "Created package cache directory: $packageDir" -ForegroundColor Green
+          }
+          
+          # Download symbols from container if needed
+          Write-Host "Downloading symbols from container..." -ForegroundColor Yellow
+          try {
+              $credential = New-Object System.Management.Automation.PSCredential ('$(containerUser)', (ConvertTo-SecureString '$(containerPassword)' -AsPlainText -Force))
+              
+              # Download symbols
+              Download-BcContainerSymbols -containerName $(containerName) -credential $credential -Path $packageDir -tenant $(tenantId)
+              Write-Host "✓ Symbols downloaded successfully" -ForegroundColor Green
+          } catch {
+              Write-Host "##[warning]Symbol download failed: $($_.Exception.Message)" -ForegroundColor Orange
+              Write-Host "Build will continue with existing symbols" -ForegroundColor Yellow
+          }
+        displayName: 'Prepare Build Environment'
 
       # CRITICAL: Compile AL code into deployable app package
       # This is where Enock's raw code becomes a ready-to-deploy Business Central extension
       - powershell: |
+          Write-Host "=== Compiling AL Application ===" -ForegroundColor Cyan
+          
           $alcPath = "$(alcPath)"
-          if (-Not (Test-Path $alcPath)) {
-              Write-Host "##[error]ALC compiler not found at $alcPath"
+          $sourceDirectory = "$(Build.SourcesDirectory)"
+          $packageCache = "$sourceDirectory\.alpackages"
+          $outputPath = "$(Build.ArtifactStagingDirectory)\$(projectName)_$(AppVersion).app"
+          
+          Write-Host "Source Directory: $sourceDirectory" -ForegroundColor Yellow
+          Write-Host "Package Cache: $packageCache" -ForegroundColor Yellow
+          Write-Host "Output Path: $outputPath" -ForegroundColor Yellow
+          
+          # Validate AL compiler exists
+          if (-not (Test-Path $alcPath)) {
+              Write-Host "##[error]ALC compiler not found at: $alcPath" -ForegroundColor Red
               exit 1
           }
-          Write-Host "ALC compiler found at $alcPath"
-          & $alcPath /project:"$(Build.SourcesDirectory)" /packagecachepath:"$(Build.SourcesDirectory)\.alpackages" /out:"$(Build.ArtifactStagingDirectory)\$(projectName)_$(AppVersion).app"
-        displayName: Compile AL App with ALC
+          
+          # Compile with detailed output
+          $compileArgs = @(
+              "/project:`"$sourceDirectory`""
+              "/packagecachepath:`"$packageCache`""
+              "/out:`"$outputPath`""
+              "/analyzer:PerTenantExtensionCop"
+              "/analyzer:AppSourceCop"
+          )
+          
+          Write-Host "Compilation command:" -ForegroundColor Yellow
+          Write-Host "$alcPath $($compileArgs -join ' ')" -ForegroundColor Gray
+          
+          $process = Start-Process -FilePath $alcPath -ArgumentList $compileArgs -Wait -PassThru -NoNewWindow -RedirectStandardOutput "$(Build.ArtifactStagingDirectory)\compile_output.log" -RedirectStandardError "$(Build.ArtifactStagingDirectory)\compile_error.log"
+          
+          # Check compilation results
+          $compileOutput = Get-Content "$(Build.ArtifactStagingDirectory)\compile_output.log" -ErrorAction SilentlyContinue
+          $compileError = Get-Content "$(Build.ArtifactStagingDirectory)\compile_error.log" -ErrorAction SilentlyContinue
+          
+          if ($compileOutput) {
+              Write-Host "=== Compilation Output ===" -ForegroundColor Cyan
+              $compileOutput | ForEach-Object { Write-Host $_ -ForegroundColor White }
+          }
+          
+          if ($compileError) {
+              Write-Host "=== Compilation Errors/Warnings ===" -ForegroundColor Orange
+              $compileError | ForEach-Object { Write-Host $_ -ForegroundColor Orange }
+          }
+          
+          if ($process.ExitCode -eq 0 -and (Test-Path $outputPath)) {
+              Write-Host "✓ Compilation successful!" -ForegroundColor Green
+              $fileInfo = Get-Item $outputPath
+              Write-Host "App file size: $([math]::Round($fileInfo.Length / 1KB, 2)) KB" -ForegroundColor Yellow
+          } else {
+              Write-Host "##[error]Compilation failed with exit code: $($process.ExitCode)" -ForegroundColor Red
+              exit 1
+          }
+        displayName: 'Compile AL Application'
 
       # Publish the compiled app as a build artifact for the next job
       - task: PublishBuildArtifacts@1
-        displayName: Publish AL App
+        displayName: 'Publish AL App Artifact'
         inputs:
-          PathtoPublish: $(Build.ArtifactStagingDirectory)
-          ArtifactName: ALApp
-          publishLocation: Container
+          PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+          ArtifactName: 'ALApp'
+          publishLocation: 'Container'
 
       # Log the compilation results for transparency and debugging
-      - powershell: |
-          Write-Host "=== Compilation Results ==="
-          Get-ChildItem "$(Build.ArtifactStagingDirectory)" -Recurse
-        displayName: Log Compilation Results
-        condition: always()  # Always run this step, even if previous steps fail
+      # Always run this step, even if previous steps fail
+      - task: PublishBuildArtifacts@1
+        displayName: 'Publish Compilation Logs'
+        inputs:
+          PathtoPublish: '$(Build.ArtifactStagingDirectory)'
+          ArtifactName: 'CompilationLogs'
+          publishLocation: 'Container'
+        condition: always()
 
       # Store build ID for potential future container tagging
       - powershell: |
-          echo "##vso[task.setvariable variable=docker_tag;isOutput=true]$(Build.BuildId)"
-        name: setVars
-        displayName: Set Docker Tag
+          Write-Host "Build completed successfully!" -ForegroundColor Green
+          Write-Host "Build ID: $(Build.BuildId)" -ForegroundColor Yellow
+          Write-Host "App Version: $(AppVersion)" -ForegroundColor Yellow
+        displayName: 'Build Summary'
 
   # **************** JOB 2: DEPLOY TO BUSINESS CENTRAL ****************
   # This ingenious job installs the app directly to a running container
   # Instead of rebuilding a container image, Enock's approach treats
   # the container as a service, saving significant time and resources
-  - job: installAppToContainer
-    displayName: Install App to Container
-    dependsOn: buildALApp  # Sequential dependency - build first, then deploy
+  - job: DeployToBCContainer
+    displayName: 'Deploy to Business Central Container'
+    # Sequential dependency - build first, then deploy
+    dependsOn: BuildALApplication
+    condition: succeeded()
     pool:
       name: BOG
 
@@ -148,138 +294,153 @@ jobs:
 
       # Download the compiled app from the previous job
       - task: DownloadPipelineArtifact@2
+        displayName: 'Download AL App'
         inputs:
-          artifact: ALApp
-          path: ./app-package
+          artifact: 'ALApp'
+          path: '$(Pipeline.Workspace)/ALApp'
 
       # MASTERSTROKE: Direct installation to running container
+      # Verify app files
       - powershell: |
-          # Verify app files
-          Write-Host "=== App Package Files ==="
-          Get-ChildItem -Path "./app-package" -Recurse
+          Write-Host "=== Pre-Deployment Validation ===" -ForegroundColor Cyan
           
-          # Install BcContainerHelper if needed
-          if (-not (Get-Module -ListAvailable -Name BcContainerHelper)) {
-              Install-Module BcContainerHelper -Force
-          }
-          Import-Module BcContainerHelper
-          
-          # Double-check container is running before attempting installation
-          $container = docker ps --filter "name=$(containerName)" --format "{{.Status}}"
-          if ($container -match "Up") {
-              Write-Host "Container '$(containerName)' is running"
-          } else {
-              Write-Host "##[error]Container '$(containerName)' not found or not running"
+          # Verify container is still running
+          $containerStatus = docker ps --filter "name=$(containerName)" --format "{{.Status}}"
+          if (-not ($containerStatus -match "Up")) {
+              Write-Host "##[error]Container '$(containerName)' is not running!" -ForegroundColor Red
               exit 1
           }
+          
+          # List downloaded artifacts
+          Write-Host "=== Downloaded Artifacts ===" -ForegroundColor Cyan
+          Get-ChildItem -Path "$(Pipeline.Workspace)/ALApp" -Recurse | ForEach-Object {
+              Write-Host "$($_.FullName) ($($_.Length) bytes)" -ForegroundColor White
+          }
+        displayName: 'Pre-Deployment Validation'
+
+      # Install BcContainerHelper if needed
+      - powershell: |
+          Write-Host "=== Setting up BcContainerHelper ===" -ForegroundColor Cyan
+          Import-Module BcContainerHelper -Force
+          Write-Host "✓ BcContainerHelper loaded" -ForegroundColor Green
+        displayName: 'Setup BcContainerHelper'
+
+      # Double-check container is running before attempting installation
+      # Find the app file to install
+      # Create credential for NavUserPassword authentication
+      # Get info about all apps in the container
+      # Get app name and publisher
+      # Get installed apps matching our app name and publisher
+      # Get app info from the current app file
+      # Save the oldest version for data upgrade
+      # Uninstall the app
+      # Get all published apps (including those not installed)
+      # Unpublish all versions
+      # Now publish and install the new version
+      # Skip the data upgrade step for first-time installs
+      # Check the parameters for Start-BcContainerAppDataUpgrade
+      # Run data upgrade if we're upgrading from a previous version
+      # Check parameters for Install-BcContainerApp
+      # Finally install the app - use correct parameter names
+      - powershell: |
+          Write-Host "=== Deploying Application to Container ===" -ForegroundColor Cyan
           
           # Find the app file to install
-          $appFile = Get-ChildItem -Path "./app-package" -Filter "*.app" | Select-Object -First 1 -ExpandProperty FullName
+          $appFile = Get-ChildItem -Path "$(Pipeline.Workspace)/ALApp" -Filter "*.app" | Select-Object -First 1
           if (-not $appFile) {
-              Write-Host "##[error]No .app file found in the app-package directory"
+              Write-Host "##[error]No .app file found in artifacts" -ForegroundColor Red
               exit 1
           }
           
-          Write-Host "Installing app: $appFile to container: $(containerName)"
+          Write-Host "Deploying app: $($appFile.Name)" -ForegroundColor Yellow
+          Write-Host "App size: $([math]::Round($appFile.Length / 1KB, 2)) KB" -ForegroundColor Yellow
           
           # Create credential for NavUserPassword authentication
-          $password = 'P@ssw0rd'
-          $securePassword = ConvertTo-SecureString -String $password -AsPlainText -Force
-          $credential = New-Object System.Management.Automation.PSCredential ('admin', $securePassword)
+          $credential = New-Object System.Management.Automation.PSCredential ('$(containerUser)', (ConvertTo-SecureString '$(containerPassword)' -AsPlainText -Force))
           
           try {
               # Get info about all apps in the container
+              Write-Host "Checking for existing app installations..." -ForegroundColor Yellow
               $existingApps = Get-BcContainerAppInfo -containerName $(containerName) -tenantSpecificProperties
               
               # Get app name and publisher
-              $appName = "BOG LABS"
-              $publisher = "Microsoft"
+              $appJsonPath = "$(Build.SourcesDirectory)\app.json"
+              $appJson = Get-Content $appJsonPath | ConvertFrom-Json
+              $appName = $appJson.name
+              $appPublisher = $appJson.publisher
+              $appVersion = "$(AppVersion)"
               
-              Write-Host "Looking for existing installations of $appName by $publisher"
+              Write-Host "App Details:" -ForegroundColor Cyan
+              Write-Host "  Name: $appName" -ForegroundColor White
+              Write-Host "  Publisher: $appPublisher" -ForegroundColor White
+              Write-Host "  Version: $appVersion" -ForegroundColor White
               
               # Get installed apps matching our app name and publisher
-              $installedApps = $existingApps | Where-Object { $_.Name -eq $appName -and $_.Publisher -eq $publisher }
-              
-              # Get app info from the current app file
-              Write-Host "Getting app info from $appFile..."
-              $appFileName = Split-Path $appFile -Leaf
-              $newAppVersion = ([regex]::Match($appFileName, '\d+\.\d+\.\d+\.\d+').Value)
-              Write-Host "New app version: $newAppVersion"
+              $installedApps = $existingApps | Where-Object { $_.Name -eq $appName -and $_.Publisher -eq $appPublisher }
               
               if ($installedApps) {
-                  # Save the oldest version for data upgrade
-                  $oldestApp = $installedApps | Sort-Object Version | Select-Object -First 1
-                  Write-Host "Oldest installed version is $($oldestApp.Version), will use for data upgrade reference"
-                  
+                  Write-Host "Found existing installations:" -ForegroundColor Yellow
                   foreach ($app in $installedApps) {
-                      Write-Host "Found installed app: $($app.Name) $($app.Version) by $($app.Publisher)"
-                      
-                      # Uninstall the app
-                      Write-Host "Uninstalling $($app.Name) $($app.Version)..."
-                      Uninstall-BcContainerApp `
-                          -containerName $(containerName) `
-                          -name $app.Name `
-                          -publisher $app.Publisher `
-                          -version $app.Version `
-                          -force
+                      Write-Host "  $($app.Name) v$($app.Version) by $($app.Publisher)" -ForegroundColor White
+                  }
+                  
+                  # Save the oldest version for data upgrade
+                  $oldestVersion = ($installedApps | Sort-Object Version)[0].Version
+                  Write-Host "Oldest installed version: $oldestVersion" -ForegroundColor Yellow
+                  
+                  # Uninstall the app
+                  foreach ($app in $installedApps) {
+                      Write-Host "Uninstalling $($app.Name) v$($app.Version)..." -ForegroundColor Yellow
+                      Uninstall-BcContainerApp -containerName $(containerName) -name $app.Name -publisher $app.Publisher -version $app.Version -force
                   }
                   
                   # Get all published apps (including those not installed)
-                  $publishedApps = Get-BcContainerAppInfo -containerName $(containerName) -publishedOnly | 
-                                  Where-Object { $_.Name -eq $appName -and $_.Publisher -eq $publisher }
-                  
                   # Unpublish all versions
+                  $publishedApps = Get-BcContainerAppInfo -containerName $(containerName) -publishedOnly | Where-Object { $_.Name -eq $appName -and $_.Publisher -eq $appPublisher }
                   foreach ($app in $publishedApps) {
-                      Write-Host "Unpublishing $($app.Name) $($app.Version) by $($app.Publisher)..."
-                      Unpublish-BcContainerApp `
-                          -containerName $(containerName) `
-                          -name $app.Name `
-                          -publisher $app.Publisher `
-                          -version $app.Version
+                      Write-Host "Unpublishing $($app.Name) v$($app.Version)..." -ForegroundColor Yellow
+                      Unpublish-BcContainerApp -containerName $(containerName) -name $app.Name -publisher $app.Publisher -version $app.Version
                   }
-              } else {
-                  Write-Host "No existing installations found for $appName by $publisher"
               }
               
               # Now publish and install the new version
-              Write-Host "Publishing new app version..."
-              Publish-BcContainerApp `
-                  -containerName $(containerName) `
-                  -appFile $appFile `
-                  -skipVerification `
-                  -sync
+              Write-Host "Publishing new app version..." -ForegroundColor Green
+              Publish-BcContainerApp -containerName $(containerName) -appFile $appFile.FullName -skipVerification -sync -install
               
-              # Skip the data upgrade step for first-time installs
-              if ($installedApps) {
-                  # Check the parameters for Start-BcContainerAppDataUpgrade
-                  $dataUpgradeCmdInfo = Get-Command Start-BcContainerAppDataUpgrade
-                  Write-Host "Start-BcContainerAppDataUpgrade parameters: $($dataUpgradeCmdInfo.Parameters.Keys -join ', ')"
-                  
-                  # Run data upgrade if we're upgrading from a previous version
-                  Write-Host "Running data upgrade to version $newAppVersion..."
-                  Start-BcContainerAppDataUpgrade `
-                      -containerName $(containerName) `
-                      -appName $appName `
-                      -appVersion $newAppVersion
+              Write-Host "✓ App deployment completed successfully!" -ForegroundColor Green
+              
+              # Verify installation
+              Write-Host "Verifying installation..." -ForegroundColor Yellow
+              $newApps = Get-BcContainerAppInfo -containerName $(containerName) -tenantSpecificProperties | Where-Object { $_.Name -eq $appName -and $_.Publisher -eq $appPublisher }
+              if ($newApps) {
+                  Write-Host "✓ App successfully installed:" -ForegroundColor Green
+                  foreach ($app in $newApps) {
+                      Write-Host "  $($app.Name) v$($app.Version) by $($app.Publisher) - Status: $($app.State)" -ForegroundColor White
+                  }
+              } else {
+                  Write-Host "##[warning]App installation could not be verified" -ForegroundColor Orange
               }
               
-              # Check parameters for Install-BcContainerApp
-              $installCmdInfo = Get-Command Install-BcContainerApp
-              Write-Host "Install-BcContainerApp parameters: $($installCmdInfo.Parameters.Keys -join ', ')"
-              
-              # Finally install the app - use correct parameter names
-              Write-Host "Installing app version $newAppVersion..."
-              Install-BcContainerApp `
-                  -containerName $(containerName) `
-                  -appName $appName `
-                  -appPublisher $publisher `
-                  -appVersion $newAppVersion
-              
-              Write-Host "App upgrade/installation complete!"
-          }
-          catch {
-              Write-Host "##[error]Error during app installation: $_"
-              Write-Host $_.ScriptStackTrace
+          } catch {
+              Write-Host "##[error]Deployment failed: $($_.Exception.Message)" -ForegroundColor Red
+              Write-Host $_.ScriptStackTrace -ForegroundColor Red
               throw
           }
-        displayName: 'Install App to Container'
+        displayName: 'Deploy Application to Container'
+
+      # Final verification and summary
+      - powershell: |
+          Write-Host "=== Deployment Summary ===" -ForegroundColor Cyan
+          
+          # Get final container information
+          $containerIp = Get-BcContainerIpAddress -containerName $(containerName)
+          Write-Host "Container Name: $(containerName)" -ForegroundColor White
+          Write-Host "Container IP: $containerIp" -ForegroundColor White
+          Write-Host "Web Client: http://$containerIp/BC/" -ForegroundColor White
+          Write-Host "Development Endpoint: http://localhost:$(devEndpointPort)/BC/dev/" -ForegroundColor White
+          Write-Host "SQL Server: localhost,$(sqlServerPort)" -ForegroundColor White
+          Write-Host "Username: $(containerUser)" -ForegroundColor White
+          
+          Write-Host "✓ Pipeline completed successfully!" -ForegroundColor Green
+          Write-Host "App Version $(AppVersion) is now deployed and ready for testing!" -ForegroundColor Yellow
+        displayName: 'Deployment Summary'
